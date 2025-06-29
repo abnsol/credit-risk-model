@@ -7,7 +7,10 @@ credit-risk-model/
 ├── .github/workflows/ci.yml        
 ├── data/                           
 │   ├── raw/                        
-│   └── processed/                  
+│   └── processed/    
+├── reports/
+│   ├── interim_report.pdf                    
+│   └── final_report.pdf                 
 ├── notebooks/
 │   └── 1.0-eda.ipynb               
 ├── src/
