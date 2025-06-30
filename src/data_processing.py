@@ -4,12 +4,11 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder
 from sklearn.impute import SimpleImputer
+import os
 
 # Suppress warnings for cleaner output during demonstration
 import warnings
 warnings.filterwarnings('ignore')
-
-print("--- Step 0: Initial Setup and Load Data ---")
 
 # Load the capped data
 df = pd.read_csv('./data/processed/data_capped.csv')
@@ -26,227 +25,151 @@ print(f"Features (X) shape: {X.shape}")
 print(f"Target (y) shape: {y.shape}")
 print("-" * 50)
 
-# (Code from Step 0 would be here)
+# --- Custom Transformer: Customer Aggregator & Feature Extractor ---
+class CustomerAggregator(BaseEstimator, TransformerMixin):
+    def __init__(self, customer_id_col='CustomerId', timestamp_col='TransactionStartTime'):
+        self.customer_id_col = customer_id_col
+        self.timestamp_col = timestamp_col
 
-print("--- Step 1: Create Aggregate Features (Revised) ---")
+    def fit(self, X, y=None):
+        return self
 
-# Convert TransactionStartTime to datetime for feature extraction
-X['TransactionStartTime'] = pd.to_datetime(X['TransactionStartTime'])
+    def transform(self, X, y=None): # Added y parameter to transform
+        X_copy = X.copy()
+        X_copy[self.timestamp_col] = pd.to_datetime(X_copy[self.timestamp_col])
 
-# Aggregate features at the CustomerId level
-customer_df = X.groupby('CustomerId').agg(
-    total_transaction_amount=('Amount', 'sum'),
-    average_transaction_amount=('Amount', 'mean'),
-    transaction_count=('TransactionId', 'count'),
-    std_transaction_amount=('Amount', 'std'),
-    distinct_product_categories=('ProductCategory', 'nunique'),
-    average_pricing_strategy=('PricingStrategy', 'mean'),
-    
-    # Extract time-based features for the *latest* transaction of each customer
-    last_transaction_hour=('TransactionStartTime', lambda x: x.max().hour),
-    last_transaction_day=('TransactionStartTime', lambda x: x.max().day),
-    last_transaction_month=('TransactionStartTime', lambda x: x.max().month),
-    last_transaction_year=('TransactionStartTime', lambda x: x.max().year)
+        # Store the original CustomerId for joining the target back
+        original_customer_ids = X_copy[self.customer_id_col]
 
-).reset_index()
+        agg_df = X_copy.groupby(self.customer_id_col).agg(**{
+            'total_transaction_amount': ('Amount', 'sum'),
+            'average_transaction_amount': ('Amount', 'mean'),
+            'std_transaction_amount': ('Amount', 'std'),
+            'transaction_count': ('TransactionId', 'count'),
+            'average_pricing_strategy': ('PricingStrategy', 'mean'),
+            'distinct_product_categories': ('ProductCategory', 'nunique'),
+            'last_transaction_hour': (self.timestamp_col, lambda x: x.max().hour),
+            'last_transaction_day': (self.timestamp_col, lambda x: x.max().day),
+            'last_transaction_month': (self.timestamp_col, lambda x: x.max().month),
+            'last_transaction_year': (self.timestamp_col, lambda x: x.max().year)
+        }).reset_index()
 
-# Also, aggregate the target variable (FraudResult) to the CustomerId level.
-customer_target = y.groupby(X['CustomerId']).max().reset_index()
-customer_df = customer_df.merge(customer_target, on='CustomerId', how='left')
-
-# Fill NaN in std_transaction_amount for customers with only one transaction
-customer_df['std_transaction_amount'].fillna(0, inplace=True)
-
-# Now, we have 'customer_df' which is our new feature set 'X_processed' and target 'y_processed'
-X_processed = customer_df.drop(columns=[TARGET_COLUMN])
-y_processed = customer_df[TARGET_COLUMN]
-
-print(f"Customer-level DataFrame shape: {X_processed.shape}")
-print("First 5 rows of customer-level aggregated data with extracted time features:")
-print(X_processed.head())
-print("-" * 50)
-
-print("--- Step 2: Extract Features from TransactionStartTime ---")
-
-# In a real customer-level model, you'd apply this to the last/first transaction time per customer
-X['TransactionHour'] = X['TransactionStartTime'].dt.hour # The hour of the day when the transaction occurred.
-X['TransactionDay'] = X['TransactionStartTime'].dt.day # The day of the month when the transaction occurred.
-X['TransactionMonth'] = X['TransactionStartTime'].dt.month # The month when the transaction occurred.
-X['TransactionYear'] = X['TransactionStartTime'].dt.year # The year when the transaction occurred.
-
-print("Extracted time-based features from 'TransactionStartTime' (at transaction level for demo).")
-print(X[['TransactionStartTime', 'TransactionHour', 'TransactionDay', 'TransactionMonth', 'TransactionYear']].head())
-print("-" * 50)
-
-print("--- Step 3: Handle Missing Values (Demonstration) ---")
-# For numerical features, typically mean or median imputation
-numerical_imputer = SimpleImputer(strategy='median') 
-
-# For categorical features (if you had any with NaNs you wanted to impute)
-categorical_imputer = SimpleImputer(strategy='most_frequent')
-
-print("Missing values in 'std_transaction_amount' were handled during aggregation.")
-print("If other missing values arise, SimpleImputer can be used within a pipeline.")
-print("-" * 50)
-
-print("--- Step 4: Encode Categorical Variables (using WoE/IV) ---")
-
-def iv_woe(data, target, bins=10, show_woe=False):
-    newDF,woeDF = pd.DataFrame(), pd.DataFrame()
-    cols = data.columns #Extract Column Names
-    
-    #Run WOE and IV on all the independent variables
-    for ivars in cols[~cols.isin([target])]:
-        # Handle continuous numerical features by binning using qcut (which is used if there are more than `bins` (default 10) unique values)
-        if (data[ivars].dtype.kind in 'bifc') and (len(np.unique(data[ivars])) > bins):
-            try:
-                binned_x = pd.qcut(data[ivars], bins,  duplicates='drop', precision=4) # Use qcut for quantile-based binning for numerical features with many unique values
-                d0 = pd.DataFrame({'x': binned_x, 'y': data[target]})
-                print(f"Binning '{ivars}' using pd.qcut with {bins} bins.")
-            except Exception as e:
-                print(f"Warning: pd.qcut failed for '{ivars}'. Attempting cut with fixed width or skipping. Error: {e}")
-                d0 = pd.DataFrame({'x': pd.cut(data[ivars], bins=bins, duplicates='drop', precision=4), 'y': data[target]})
+        agg_df['std_transaction_amount'].fillna(0, inplace=True)
+        agg_df = agg_df.set_index(self.customer_id_col)
+        
+        # If y is provided during transform, aggregate it and return it along with X
+        if y is not None:
+            # Align y with original CustomerIds for aggregation
+            y_df = pd.DataFrame({'CustomerId': original_customer_ids, 'Target': y})
+            y_aggregated = y_df.groupby('CustomerId')['Target'].max() # Max to get 1 if any fraud occurred
+            return agg_df, y_aggregated # Return both X and y
         else:
-            # For categorical or numerical with few unique values, treat as is
-            d0 = pd.DataFrame({'x': data[ivars], 'y': data[target]})
-            print(f"Processing '{ivars}' as categorical/few unique values.")
+            return agg_df # Return only X if y is not provided (e.g., during predict)
 
-        d0 = d0.astype({"x": str}) # Convert bins/categories to string for grouping
-        d = d0.groupby("x", as_index=False, dropna=False).agg({"y": ["count", "sum"]})
-        d.columns = ['Cutoff', 'N', 'Events']
+# --- Custom Transformer: Robust WoE Transformer ---
+class RobustWoETransformer(BaseEstimator, TransformerMixin):
+    def __init__(self, numerical_cols_to_bin, bins=10, fill_value=0.0):
+        self.numerical_cols_to_bin = numerical_cols_to_bin
+        self.bins = bins
+        self.fill_value = fill_value
+        self.woe_maps = {}
+        self.binner_info = {}
+
+    def fit(self, X, y): # y is expected here from pipeline
+        # X here is the aggregated customer-level features (output of CustomerAggregator)
+        # y is the aggregated target (y_aggregated from CustomerAggregator.transform)
         
-        # Add small constant to avoid division by zero or log of zero
-        d['% of Events'] = np.maximum(d['Events'], 0.5) / d['Events'].sum()
-        d['Non-Events'] = d['N'] - d['Events']
-        d['% of Non-Events'] = np.maximum(d['Non-Events'], 0.5) / d['Non-Events'].sum()
-        
-        d['WoE'] = np.log(d['% of Non-Events']/d['% of Events']) # WoE formula
-        d['IV'] = d['WoE'] * (d['% of Non-Events']-d['% of Events']) # IV formula 
-        d.insert(loc=0, column='Variable', value=ivars)
-        
-        total_iv = d['IV'].sum()
-        print("Information value of " + ivars + " is " + str(round(total_iv,6)))
-        temp =pd.DataFrame({"Variable" : [ivars], "IV" : [total_iv]}, columns = ["Variable", "IV"])
-        newDF=pd.concat([newDF,temp], axis=0)
-        woeDF=pd.concat([woeDF,d], axis=0)
+        # Ensure y is a Series for direct alignment with X's index
+        y_series = pd.Series(y, index=X.index)
 
-        #Show WOE Table
-        if show_woe == True:
-            print(d)
-    return newDF, woeDF
-
-# Before applying WoE/IV, let's identify categorical and numerical features suitable for it
-# Remember X_processed is now customer-level data
-categorical_cols_for_woe = X_processed.select_dtypes(include='object').columns.tolist()
-# Exclude 'CustomerId' as it's an ID, not a predictive feature to transform directly
-if 'CustomerId' in categorical_cols_for_woe:
-    categorical_cols_for_woe.remove('CustomerId')
-
-# Numerical columns to be binned for WoE calculation
-numerical_cols_for_woe = X_processed.select_dtypes(include=np.number).columns.tolist()
-
-# Combine all features that will undergo WoE transformation
-features_for_woe = categorical_cols_for_woe + numerical_cols_for_woe
-
-print(f"\nFeatures selected for WoE/IV calculation: {features_for_woe}")
-
-# Create a DataFrame for WoE/IV calculation (including features and target)
-df_for_woe_iv = X_processed[features_for_woe].copy()
-df_for_woe_iv[TARGET_COLUMN] = y_processed # Add the target column
-
-# Calculate IV and WoE values for each feature
-iv_table, woe_table = iv_woe(df_for_woe_iv, TARGET_COLUMN, bins=10, show_woe=False)
-
-print("\n--- Information Value (IV) Table ---")
-print(iv_table.sort_values(by='IV', ascending=False))
-
-# --- Feature Selection based on IV ---
-selected_features_iv = iv_table[iv_table['IV'] >= 0.02]['Variable'].tolist() # Keep features with at least weak predictive power
-print(f"\nFeatures selected based on IV (>= 0.02): {selected_features_iv}")
-
-# Create a WoE Transformer Class for use in scikit-learn Pipeline
-class WoETransformer(BaseEstimator, TransformerMixin):
-    def __init__(self, woe_map=None, fill_value=0):
-        self.woe_map = woe_map # Stores WoE mapping for each feature
-        self.fill_value = fill_value # Value to use for categories not seen during fit
-
-    def fit(self, X, y):
-        self.woe_map = {}
-        for col in X.columns:
-            # Need to re-bin continuous numerical columns if they were part of WoE calculation
-            if X[col].dtype.kind in 'bifc' and col in numerical_cols_for_woe: # Check if it's a numerical col that was binned
+        for col_name in X.columns:
+            if col_name in self.numerical_cols_to_bin:
                 try:
-                    # Use pd.qcut for numerical, same bins as in iv_woe if possible
-                    binned_x = pd.qcut(X[col], 10,  duplicates='drop', precision=4)
-                    temp_df = pd.DataFrame({'x': binned_x, 'y': y})
+                    binned_data, bins_edges = pd.qcut(X[col_name], self.bins, duplicates='drop', retbins=True, precision=4)
+                    self.binner_info[col_name] = {'type': 'qcut', 'bins_edges': bins_edges}
+                    temp_series = binned_data
                 except Exception:
-                    temp_df = pd.DataFrame({'x': pd.cut(X[col], bins=10, duplicates='drop', precision=4), 'y': y})
+                    binned_data, bins_edges = pd.cut(X[col_name], bins=self.bins, duplicates='drop', retbins=True, precision=4)
+                    self.binner_info[col_name] = {'type': 'cut', 'bins_edges': bins_edges}
+                    temp_series = binned_data
+                
+                temp_series = temp_series.astype(str)
             else:
-                # For categorical or numerical with few unique values
-                temp_df = pd.DataFrame({'x': X[col], 'y': y})
-            
-            temp_df['x'] = temp_df['x'].astype(str) # Ensure string for grouping
+                temp_series = X[col_name].astype(str)
 
-            d = temp_df.groupby("x", as_index=False, dropna=False).agg(
-                {"y": ["count", "sum"]}
-            )
+            d0 = pd.DataFrame({'x': temp_series, 'y': y_series}) # Use y_series here
+            d = d0.groupby("x", as_index=False, dropna=False).agg({"y": ["count", "sum"]})
             d.columns = ['Cutoff', 'N', 'Events']
             d['Non-Events'] = d['N'] - d['Events']
-            
-            # Avoid division by zero for proportions
             d['% of Events'] = np.maximum(d['Events'], 0.5) / d['Events'].sum()
             d['% of Non-Events'] = np.maximum(d['Non-Events'], 0.5) / d['Non-Events'].sum()
-            
             d['WoE'] = np.log(d['% of Non-Events']/d['% of Events'])
             
-            # Store the mapping from category/bin to WoE
-            self.woe_map[col] = d.set_index('Cutoff')['WoE'].to_dict()
+            self.woe_maps[col_name] = d.set_index('Cutoff')['WoE'].to_dict()
         return self
 
     def transform(self, X):
         X_transformed = X.copy()
-        for col in X.columns:
-            if col in self.woe_map: # Only transform columns for which we have a WoE map
-                # Need to re-bin continuous numerical columns if they were part of WoE calculation
-                if X_transformed[col].dtype.kind in 'bifc' and col in numerical_cols_for_woe:
-                    try:
-                         # Use pd.qcut for numerical, same bins as in iv_woe if possible
-                        binned_x = pd.qcut(X_transformed[col], 10,  duplicates='drop', precision=4)
-                        X_transformed[col] = binned_x.astype(str)
-                    except Exception:
-                        X_transformed[col] = pd.cut(X_transformed[col], bins=10, duplicates='drop', precision=4).astype(str)
+        for col_name in X.columns:
+            if col_name in self.woe_maps:
+                if col_name in self.numerical_cols_to_bin:
+                    binner_type = self.binner_info[col_name]['type']
+                    bins_edges = self.binner_info[col_name]['bins_edges']
+                    binned_data = pd.cut(X_transformed[col_name], bins=bins_edges, include_lowest=True, right=True, duplicates='drop', precision=4)
+                    X_transformed[col_name] = binned_data.astype(str)
                 else:
-                    X_transformed[col] = X_transformed[col].astype(str)
+                    X_transformed[col_name] = X_transformed[col_name].astype(str)
 
-                # Map categories/bins to WoE values
-                X_transformed[col] = X_transformed[col].map(self.woe_map[col]).fillna(self.fill_value)
-
+                X_transformed[col_name] = X_transformed[col_name].map(self.woe_maps[col_name]).fillna(self.fill_value)
+            else:
+                pass
         return X_transformed
 
-# Prepare data for WoE transformation: select features identified by IV
-# Note: WoE Transformer will handle binning/categorization internally based on its fit method
-X_woe_transformed = X_processed[selected_features_iv].copy()
+# --- Define the numerical features that will be binned and WoE-transformed after aggregation ---
+numerical_features_from_agg_to_woe_bin = [
+    'total_transaction_amount', 'average_transaction_amount',
+    'std_transaction_amount', 'transaction_count',
+    'average_pricing_strategy', 'distinct_product_categories',
+    'last_transaction_hour', 'last_transaction_day',
+    'last_transaction_month', 'last_transaction_year'
+]
 
-# Initialize and fit the WoE Transformer
-woe_transformer = WoETransformer()
-woe_transformer.fit(X_woe_transformed, y_processed)
+# --- Build the full preprocessing pipeline ---
+# For complex aggregation scenarios where y must be aligned with aggregated X:
 
-# Transform the selected features
-X_woe_transformed = woe_transformer.transform(X_woe_transformed)
+print("\nExecuting Feature Engineering in two phases for target alignment:")
+print("Phase 1: Transaction-level to Customer-level Aggregation (X and y)")
 
-print("\n--- Features after WoE Transformation ---")
-print(X_woe_transformed.head())
-print("-" * 50)
+# Phase 1: Aggregate data (X) and also aggregate the target (y)
+customer_aggregator_transformer = CustomerAggregator(customer_id_col='CustomerId', timestamp_col='TransactionStartTime')
+X_aggregated, y_aggregated = customer_aggregator_transformer.transform(X, y)
 
-print("--- Step 5: Normalize/Standardize Numerical Features ---")
+print(f"Aggregated Features (X_aggregated) shape: {X_aggregated.shape}")
+print(f"Aggregated Target (y_aggregated) shape: {y_aggregated.shape}")
 
-# Apply StandardScaler to these
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X_woe_transformed)
+print("\nPhase 2: WoE Transformation and Scaling on Customer-level data")
 
-# Convert back to DataFrame with original column names
-X_scaled = pd.DataFrame(X_scaled, columns=X_woe_transformed.columns, index=X_woe_transformed.index)
+# Phase 2: Create a sub-pipeline for WoE and Scaling
+preprocessing_sub_pipeline = Pipeline([
+    ('woe_transformer', RobustWoETransformer(
+        numerical_cols_to_bin=numerical_features_from_agg_to_woe_bin,
+        bins=10
+    )),
+    ('scaler', StandardScaler())
+])
 
-print("\n--- Features after Standardization ---")
-print(X_scaled.head())
+# Fit and transform the aggregated data using the sub-pipeline
+X_processed_final = preprocessing_sub_pipeline.fit_transform(X_aggregated, y_aggregated)
+
+# Convert back to DataFrame for usability
+try:
+    final_feature_names = numerical_features_from_agg_to_woe_bin
+    X_processed_final_df = pd.DataFrame(X_processed_final, columns=final_feature_names, index=X_aggregated.index)
+except Exception as e:
+    print(f"Could not reconstruct DataFrame with column names after pipeline: {e}. Showing as NumPy array.")
+    X_processed_final_df = pd.DataFrame(X_processed_final)
+
+print(f"\nFinal Model-Ready Features (X_processed_final) shape: {X_processed_final_df.shape}")
+print("First 5 rows of the final transformed data:")
+print(X_processed_final_df.head())
 print("-" * 50)
