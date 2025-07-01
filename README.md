@@ -1,114 +1,232 @@
-# CREDIT RISK MODEL
+# Credit Risk Model for High-Risk Customer Identification
 
-This repository houses a credit risk modeling project, focusing on the development of a robust and interpretable credit scoring system.
-
----
+This repository houses a comprehensive credit risk modeling project developed as part of the Kifiya AI Mastery training program. The primary objective is to build a robust, interpretable, and deployable credit scoring system that leverages alternative transaction data to identify high-risk customer segments. This is crucial for financial institutions to effectively manage credit risk, optimize capital allocation, and ensure compliance with regulatory frameworks like Basel II.
 
 ## Project Structure
 
-```bash
+```plaintext
 credit-risk-model/
-├── .github/workflows/ci.yml        
-├── data/                           
-│   ├── raw/                        
-│   └── processed/    
-├── reports/
-│   ├── interim_report.pdf                    
-│   └── final_report.pdf                 
+├── .github/workflows/ci.yml         # GitHub Actions CI/CD workflow for automated testing
+├── data/
+│   ├── raw/                         # Raw, unprocessed input data (e.g., data.csv)
+│   └── processed/                   # Cleaned data for modeling (model_features.csv, is_high_risk_target.csv)
+├── models/
+│   ├── final_best_credit_risk_model.pkl
+│   └── feature_engineering_pipeline.pkl
 ├── notebooks/
-│   └── 1.0-eda.ipynb               
+│   └── 1.0-eda.ipynb                # EDA and initial insights
 ├── src/
 │   ├── __init__.py
-│   ├── data_processing.py         
-│   ├── train.py                    
-│   ├── predict.py                  
+│   ├── data_processing.py
+│   ├── train.py
+│   ├── predict.py
+│   ├── transformers.py
 │   └── api/
-│       ├── main.py                 
-│       └── pydantic_models.py    
+│       ├── main.py
+│       └── pydantic_models.py
 ├── tests/
-│   └── test_data_processing.py     
+│   └── test_data_processing.py
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
 ├── .gitignore
 └── README.md
+
 ```
+
+
 ## Credit Scoring Business Understanding
 
 Credit scoring models are vital tools in the financial industry, enabling lenders to assess the creditworthiness of borrowers and manage credit risk effectively. This section delves into key considerations for developing such a model, particularly within a regulated environment.
 
 ### Influence of Basel II Accord on Model Interpretability and Documentation
 
-The **Basel II Capital Accord** places significant emphasis on robust risk management and capital adequacy for financial institutions. Its core pillars (Pillar 1: Minimum Capital Requirements, Pillar 2: Supervisory Review Process, and Pillar 3: Market Discipline) directly influence the need for interpretable and well-documented credit risk models:
+Basel II emphasizes:
 
-* **Risk Measurement Accuracy:** Basel II mandates that banks accurately measure and quantify credit risk to determine their capital requirements. This necessitates models that are not only predictive but also **transparent** in how they arrive at their predictions. An interpretable model allows financial institutions to understand the drivers of risk, validate its assumptions, and ensure its outputs align with business realities and regulatory expectations.
-* **Model Validation and Auditability:** Regulatory bodies require rigorous validation of risk models. For a model to be validated effectively, its internal workings must be understandable. **Black-box models** are challenging to audit, making it difficult to justify their outputs to supervisors. Well-documented models provide a clear audit trail, explaining the data used, the methodologies applied, and the rationale behind model choices, which is crucial for regulatory compliance.
-* **Pillar 2: Supervisory Review Process:** Supervisors critically assess a bank's internal capital adequacy assessment process (ICAAP). This includes evaluating the robustness of their risk models. **Interpretability** helps supervisors understand model limitations, sensitivities, and the institution's capacity to manage model risk.
-* **Pillar 3: Market Discipline:** While less direct, transparent and understandable models contribute to better public disclosure of risk management practices, fostering market confidence.
+- Minimum Capital Requirements
+- Supervisory Review Process
+- Market Discipline
 
-In essence, Basel II transforms credit risk modeling from a purely predictive exercise into a critical regulatory and risk management function where interpretability and thorough documentation are paramount for trust, compliance, and sound decision-making.
+These require that credit risk models be interpretable, validated, and auditable.
 
-### Necessity of Proxy Variables for Default and Associated Business Risks
+**Key Points:**
 
-In many real-world credit datasets, a direct "default" label (e.g., a formal declaration of bankruptcy or charge-off) might be scarce or unavailable, especially for newer loans or less severe delinquencies. Therefore, creating a **proxy variable** for default becomes necessary. This proxy typically involves defining default based on a combination of observable events such as:
+- **Risk Measurement Accuracy:** Banks must quantify credit risk transparently.
+- **Model Validation and Auditability:** Models must be understandable and well-documented.
+- **Supervisory Review Process:** Evaluates the robustness of internal models.
+- **Market Discipline:** Encourages transparency and market confidence.
 
-* **Days Past Due (DPD):** A common threshold, e.g., 90 or 180 DPD.
-* **Restructuring/Write-off:** Instances where the loan terms are significantly altered due to borrower distress.
-* **Legal Action:** Initiation of collection procedures or legal actions.
+Basel II transforms credit risk modeling into a regulatory and risk management function.
 
-**Why it's necessary:**
+## Necessity of Proxy Variables for Default and Associated Business Risks
 
-* **Scarcity of True Default Labels:** True defaults are relatively rare events, making it challenging to train robust models solely on them. Proxies expand the "default" population for model training.
-* **Early Warning Signals:** A proxy can capture early signs of financial distress before a formal default occurs, allowing for proactive risk management.
-* **Business Context:** The business may define "unacceptable risk" or "failure to pay" based on criteria that precede a legal default.
+When true default labels are unavailable, proxy variables must be used.
 
-**Potential Business Risks of Making Predictions Based on a Proxy:**
+### Common Proxy Events:
 
-* **Misclassification Risk:** The most significant risk is that the proxy variable may not perfectly align with the true definition of default from a business or regulatory perspective. This can lead to:
-    * **False Positives (Type I Error):** Classifying a borrower as "at risk" based on the proxy when they would not have truly defaulted. This could lead to denying credit to creditworthy customers, resulting in **lost revenue** and **damaged customer relationships**.
-    * **False Negatives (Type II Error):** Classifying a borrower as "low risk" when they will genuinely default. This leads to **increased loan losses** and **undermines the bank's financial stability**.
-* **Model Bias:** If the proxy definition inherently biases the dataset (e.g., by excluding certain types of defaults or disproportionately capturing others), the model trained on it will inherit this bias, leading to unfair or inaccurate predictions across different customer segments.
-* **Operational Misalignment:** Business processes (e.g., collections, recovery) are often tied to the formal definition of default. If the model's proxy-based predictions diverge significantly from these operational triggers, it can create inefficiencies and confusion.
-* **Regulatory Scrutiny:** Regulators will scrutinize the definition and justification of any proxy variable used, and a poorly defined proxy could lead to non-compliance issues.
-* **Evolving Risk Landscape:** The effectiveness of a proxy can diminish over time as economic conditions or borrower behaviors change, requiring constant re-evaluation and potential re-definition.
+- Days Past Due (DPD), e.g., 90 or 180 days
+- Restructuring or Write-off
+- Legal Action
 
-Therefore, careful consideration, robust validation, and continuous monitoring of the chosen proxy variable are crucial to mitigate these business risks.
+### Reasons for Proxy Use:
 
-### Trade-offs Between Simple Interpretable Models (Logistic Regression with WoE) and Complex High-Performance Models (Gradient Boosting)
+- True defaults are rare
+- Enables early warning signals
+- Reflects business-specific definitions of risk
 
-In a regulated financial context like credit risk, choosing between model complexity and interpretability involves significant trade-offs:
+### Risks of Using Proxies:
 
-| Feature/Consideration      | Simple, Interpretable Model (e.g., Logistic Regression with WoE) | Complex, High-Performance Model (e.g., Gradient Boosting) |
-| :------------------------- | :--------------------------------------------------------------- | :-------------------------------------------------------- |
-| **Interpretability** | **High:** Coefficients indicate the direction and magnitude of impact of each variable. WoE transformation makes relationships monotonic and more intuitive. Easy to explain to business users and regulators. | **Low:** Often considered "black-box" models. Relationships are non-linear and interactions are complex, making it difficult to understand individual variable contributions directly. |
-| **Performance (Accuracy)** | **Good to Moderate:** Often performs well, especially with careful feature engineering (like WoE). May struggle with highly non-linear relationships or complex interactions. | **High:** Typically achieves state-of-the-art performance due to its ability to capture complex non-linear patterns and interactions within the data. |
-| **Regulatory Compliance** | **Easier:** Meets Basel II and other regulatory requirements for transparency, validation, and explainability more readily. Less likely to face pushback during audits. | **Challenging:** Requires significant effort in explainability techniques (e.g., SHAP, LIME) to satisfy regulatory demands for understanding model decisions. Higher scrutiny from regulators. |
-| **Model Validation** | **Straightforward:** Easier to validate assumptions, assess stability, and identify potential biases due to its transparent nature. | **Complex:** Validation requires advanced techniques to ensure robustness, stability, and fairness. Understanding model sensitivities can be challenging. |
-| **Explainability to Stakeholders** | **Excellent:** Business users, risk managers, and even customers can generally understand why a credit decision was made. Supports clear policy formulation. | **Difficult:** Explaining individual predictions can be challenging, often requiring specialized tools and expert knowledge. Can lead to a lack of trust if decisions cannot be clearly justified. |
-| **Feature Engineering** | **Crucial:** Performance heavily relies on well-engineered features (e.g., WoE, binning) to capture non-linearities and improve linearity for the model. | **Less Critical (initially):** Can discover complex interactions automatically. However, good feature engineering still improves performance and robustness. |
-| **Development Time/Complexity** | Generally quicker to develop and iterate on, especially with established WoE methodologies. | Can be more computationally intensive and require more hyperparameter tuning, potentially leading to longer development cycles. |
-| **Risk Management** | Easier to embed into risk management frameworks, set clear credit policies based on model outputs, and monitor performance against specific risk drivers. | More challenging to integrate directly into policy rules due to their complexity. Might require additional layers of interpretation or rule extraction. |
+- **Misclassification:** False positives and negatives
+- **Model Bias:** Inherited from proxy design
+- **Operational Misalignment:** Between model predictions and formal processes
+- **Regulatory Scrutiny:** Must justify proxy use
+- **Evolving Landscape:** Proxies may degrade over time
 
-**Conclusion on Trade-offs:**
+Careful validation and monitoring are essential.
 
-In a regulated financial context, the **interpretability of the model often takes precedence over marginal gains in predictive performance**. While a complex model might offer slightly higher accuracy, the inability to explain its decisions can lead to:
+## Trade-offs Between Simple and Complex Models
 
-* **Regulatory non-compliance:** Failure to meet model validation and explainability requirements.
-* **Loss of business trust:** Inability to justify credit decisions to applicants or internal stakeholders.
-* **Difficulty in risk management:** Inability to understand and manage the drivers of credit risk.
+| Feature | Logistic Regression (WoE) | Gradient Boosting |
+|--------|----------------------------|-------------------|
+| Interpretability | High | Low |
+| Performance (Accuracy) | Good to Moderate | High |
+| Regulatory Compliance | Easier | Challenging |
+| Model Validation | Straightforward | Complex |
+| Explainability | Excellent | Difficult |
+| Feature Engineering | Crucial | Less critical initially |
+| Development Time | Quick | Slower |
+| Risk Management | Easy to embed | More challenging |
 
-Therefore, **Logistic Regression with WoE often serves as a robust baseline and a preferred choice in many production credit scoring systems** due to its inherent interpretability and ease of regulatory acceptance. Complex models like Gradient Boosting might be used for internal analytical purposes, challenger models, or in scenarios where the performance gain significantly outweighs the interpretability cost and appropriate explainability techniques can be rigorously applied and validated. The optimal choice often involves a **hybrid approach**, where interpretable models are used for core decision-making and more complex models provide additional insights or serve as benchmarks.
+**Conclusion:**  
+In regulated environments, interpretability often outweighs marginal gains in accuracy. Logistic Regression with WoE is often preferred for deployment, while complex models may serve as challenger models or be used internally.
 
 ## Exploratory Data Analysis (EDA) Insights
 
-Following a comprehensive Exploratory Data Analysis (EDA) of the credit risk dataset, several crucial insights have been identified that will inform subsequent data preprocessing and model development:
+### Key Findings:
 
-1.  **Absence of Explicit Missing Values:** A thorough check revealed no explicit missing values (NaNs) across any columns in the dataset. This simplifies the data cleaning process significantly, as direct imputation strategies for NaNs will not be required.
+- **Data Size:** 95,662 transaction records, 16 columns.
+- **Missing Values:** None explicitly present.
+- **Currency and Country:** All in UGX (Uganda), single country code (256).
+- **Feature Redundancy:** 'Amount' and 'Value' have 0.99 correlation.
+- **Outliers:** Significant in 'Amount' and 'Value', handled via winsorization.
+- **Categoricals:** ProviderId, ProductId, ProductCategory, ChannelId, PricingStrategy.
+- **Temporal Features:** Extracted from 'TransactionStartTime' (e.g., hour, day, month, year).
+- **Target Imbalance:** FraudResult used as a proxy, with only 0.2% positive class.
 
-2.  **Perfect Multicollinearity between 'Amount' and 'Value':** The features 'Amount' and 'Value' exhibit a perfect positive linear correlation (1.00). This strong relationship indicates redundancy, where both features convey identical information. To avoid multicollinearity and streamline the feature set, one of these columns will be dropped during feature engineering.
+## Feature Engineering
 
-3.  **Significant Outliers in 'Amount' and 'Value':** Both 'Amount' and 'Value' contain a substantial number of extreme outliers, as visualized in their respective box plots. These outliers could heavily skew statistical analyses and disproportionately impact model training. Robust outlier handling techniques, such as capping (winsorization) or data transformations (e.g., log transformation), will be necessary to manage their impact.
+Implemented via a robust `sklearn.pipeline.Pipeline` with custom transformers.
 
-4.  **Weak Linear Correlation with 'FraudResult':** The target variable, 'FraudResult' (indicating fraud), shows very weak linear correlations with all numerical features. This suggests that simple linear relationships alone are insufficient for predicting fraudulent transactions effectively. This highlights the importance of exploring non-linear patterns, leveraging categorical features, and extracting new features (e.g., from `TransactionStartTime`) to build a robust fraud detection model.
+### Key Steps:
 
-5.  **Categorical Nature of 'CountryCode' and 'PricingStrategy' & Temporal Feature Potential:** While `CountryCode` and `PricingStrategy` are currently represented as numerical types, their nature as identifier codes or distinct categories suggests they should be treated as categorical features. Converting them will allow models to better capture their influence. Additionally, the `TransactionStartTime` column, currently an object type, will be parsed into a datetime format to extract valuable temporal features (e.g., hour of day, day of week, time since last transaction for a customer) which could be highly indicative of fraudulent activity.
+**1. Customer-Level Aggregation:**
+
+- `total_transaction_amount`
+- `average_transaction_amount`
+- `transaction_count`
+- `std_transaction_amount`
+- `average_pricing_strategy`
+- `distinct_product_categories`
+
+Handled by `CustomerAggregator`.
+
+**2. Temporal Feature Extraction:**
+
+From last transaction:
+- `last_transaction_hour`
+- `last_transaction_day`
+- `last_transaction_month`
+- `last_transaction_year`
+
+**3. Proxy Target Variable (RFM + Clustering):**
+
+- RFM metrics: Recency, Frequency, Monetary
+- StandardScaler applied
+- KMeans clustering into 3 groups
+- High-risk segment labeled `1`
+
+**4. WoE Transformation:**
+
+- Handles binning, non-linearity, and interpretability.
+- Applied to all numerical features using `RobustWoETransformer`.
+
+**5. Feature Scaling:**
+
+- StandardScaler ensures zero mean and unit variance.
+
+**Final Outputs:**
+
+- `data/processed/model_features.csv`
+- `data/processed/is_high_risk_target.csv`
+
+## Model Training and Tracking
+
+### Methodology:
+
+- **Split:** 80/20 with `stratify=y`
+- **Models:** Logistic Regression, Random Forest, Gradient Boosting
+- **Baselines:** Untuned versions for benchmarks
+- **Tuning:** GridSearchCV with 5-fold StratifiedKFold
+- **Metric:** ROC AUC
+- **Tracking:** MLflow
+
+### MLflow Logged:
+
+- Model type, parameters
+- Metrics (ROC AUC, Accuracy, Precision, Recall, F1)
+- Model artifact
+
+### Model Performance Summary:
+
+| Model | CV ROC AUC | Test ROC AUC | Precision (1) | Recall (1) | F1 (1) |
+|-------|------------|--------------|---------------|------------|--------|
+| Logistic Regression (Baseline) | N/A | 0.9722 | 0.99 | 0.86 | 0.92 |
+| Logistic Regression (Tuned) | 0.9702 | 0.9723 | 0.99 | 0.86 | 0.92 |
+| Random Forest (Baseline) | N/A | 0.9856 | 0.96 | 0.92 | 0.94 |
+| Random Forest (Tuned) | 0.9909 | 0.9902 | 0.96 | 0.91 | 0.93 |
+| Gradient Boosting (Baseline) | N/A | **0.9929** | 0.94 | 0.91 | 0.93 |
+| Gradient Boosting (Tuned) | 0.9922 | 0.9908 | 0.93 | 0.91 | 0.92 |
+
+### Conclusion:
+
+Gradient Boosting (Baseline) was the best-performing model.
+
+### Model Registration and Saving:
+
+- Registered as `CreditRiskClassifier` (Version 1) in MLflow
+- Saved locally: `models/final_best_credit_risk_model.pkl`
+- Pipeline: `models/feature_engineering_pipeline.pkl`
+
+## Model Deployment and CI/CD
+
+### API Deployment (FastAPI)
+
+**Files:**
+
+- `src/api/pydantic_models.py`: Request/response validation models
+- `src/api/main.py`:
+  - Loads model and pipeline
+  - Exposes `/predict` endpoint
+  - Handles prediction logic
+
+### Containerization (Docker)
+
+- `Dockerfile`: Defines image and environment
+- `docker-compose.yml`: Maps ports, volumes, builds API container
+
+### Continuous Integration (GitHub Actions)
+
+**File:** `.github/workflows/ci.yml`
+
+**Steps:**
+
+- Trigger on push to `main`
+- Set up Python 3.9
+- Install dependencies
+- Run `flake8` on `src/`
+- Run `pytest` on `tests/`
+- Fail build if linting or tests fail
+
+---
+
+This README provides a complete technical and business overview of the credit risk modeling project, including its motivation, regulatory context, methodology, experimentation, and deployment.
