@@ -99,3 +99,73 @@ with mlflow.start_run(run_name="Logistic_Regression_Tuned"):
     mlflow.sklearn.log_model(best_log_reg_model, "best_logistic_regression_model")
     all_models["Logistic Regression (Best Tuned)"] = best_log_reg_model
     print(f"MLflow Run ID for Tuned LR: {mlflow.active_run().info.run_id}\n")
+
+
+# --- 2. Random Forest ---
+print("--- Training Random Forest Models ---")
+
+# Training a baseline Random Forest model
+with mlflow.start_run(run_name="Random_Forest_Baseline"):
+    print("Training Baseline Random Forest Model...")
+    rf_baseline = RandomForestClassifier(random_state=42, class_weight='balanced')
+    rf_baseline.fit(X_train, y_train) 
+    print("Baseline Random Forest Model Trained.\n")
+
+    mlflow.log_param("model_type", "Random Forest Baseline")
+    mlflow.log_param("n_estimators", rf_baseline.n_estimators) # Default n_estimators
+    mlflow.log_param("max_depth", rf_baseline.max_depth) # Default max_depth
+    mlflow.log_param("class_weight", "balanced")
+
+    y_pred_baseline = rf_baseline.predict(X_test)
+    y_pred_proba_baseline = rf_baseline.predict_proba(X_test)[:, 1]
+    mlflow.log_metric("roc_auc", roc_auc_score(y_test, y_pred_proba_baseline))
+    mlflow.log_metric("accuracy", accuracy_score(y_test, y_pred_baseline))
+    mlflow.log_metric("precision", precision_score(y_test, y_pred_baseline))
+    mlflow.log_metric("recall", recall_score(y_test, y_pred_baseline))
+    mlflow.log_metric("f1_score", f1_score(y_test, y_pred_baseline))
+    mlflow.sklearn.log_model(rf_baseline, "baseline_random_forest_model")
+    all_models["Random Forest (Baseline)"] = rf_baseline
+    print(f"MLflow Run ID for Baseline RF: {mlflow.active_run().info.run_id}\n")
+
+
+# Training a tuned Random Forest model
+with mlflow.start_run(run_name="Random_Forest_Tuned"):
+    print("Starting Hyperparameter Tuning for Random Forest...")
+    rf_tuned = RandomForestClassifier(random_state=42, class_weight='balanced')
+    rf_param_grid = {
+        'n_estimators': [50, 100, 200], # Added 200 for more thorough tuning
+        'max_depth': [5, 10, 20, None], # Added 20 for more depth options
+        'min_samples_split': [2, 5, 10], # Added 10
+        'min_samples_leaf': [1, 2, 4] # Added 4
+    }
+
+    grid_search_rf = GridSearchCV(
+        estimator=rf_tuned,
+        param_grid=rf_param_grid,
+        cv=cv_folds,
+        scoring='roc_auc',
+        n_jobs=-1,
+        verbose=1
+    )
+
+    grid_search_rf.fit(X_train, y_train)
+
+    best_rf_model = grid_search_rf.best_estimator_
+    print("Hyperparameter Tuning for Random Forest Complete.")
+    print(f"Best Random Forest Hyperparameters: {grid_search_rf.best_params_}")
+    print(f"Best Cross-Validation ROC AUC: {grid_search_rf.best_score_:.4f}\n")
+
+    mlflow.log_params(grid_search_rf.best_params_)
+    mlflow.log_param("model_type", "Random Forest Tuned")
+    mlflow.log_param("class_weight", "balanced")
+
+    y_pred_tuned = best_rf_model.predict(X_test)
+    y_pred_proba_tuned = best_rf_model.predict_proba(X_test)[:, 1]
+    mlflow.log_metric("roc_auc", roc_auc_score(y_test, y_pred_proba_tuned))
+    mlflow.log_metric("accuracy", accuracy_score(y_test, y_pred_tuned))
+    mlflow.log_metric("precision", precision_score(y_test, y_pred_tuned))
+    mlflow.log_metric("recall", recall_score(y_test, y_pred_tuned))
+    mlflow.log_metric("f1_score", f1_score(y_test, y_pred_tuned))
+    mlflow.sklearn.log_model(best_rf_model, "best_random_forest_model")
+    all_models["Random Forest (Best Tuned)"] = best_rf_model
+    print(f"MLflow Run ID for Tuned RF: {mlflow.active_run().info.run_id}\n")
