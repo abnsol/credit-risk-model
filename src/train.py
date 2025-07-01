@@ -241,3 +241,69 @@ with mlflow.start_run(run_name="GBM_Tuned"):
     mlflow.sklearn.log_model(best_gbm_model, "best_gbm_model")
     all_models["Gradient Boosting (Best Tuned)"] = best_gbm_model
     print(f"MLflow Run ID for Tuned GBM: {mlflow.active_run().info.run_id}\n")
+
+# --- Evaluation of All Models ---
+print("--- Overall Model Evaluation Summary ---")
+for name, model in all_models.items():
+    print(f"\nEvaluating: {name}")
+    y_pred = model.predict(X_test)
+    y_pred_proba = model.predict_proba(X_test)[:, 1]
+
+    print(f"ROC AUC Score: {roc_auc_score(y_test, y_pred_proba):.4f}")
+    print("Classification Report:")
+    print(classification_report(y_test, y_pred))
+
+# --- Identify and Register Best Model ---
+# Based on your previous output, the Gradient Boosting (Baseline) model had the highest ROC AUC (0.9929).
+best_model_run_id = "f7ecee4b8feb418cb4923481817344b5" # From MLflow output for GBM Baseline
+best_model_artifact_path = "baseline_gbm_model"      # Artifact name used when logging GBM Baseline
+best_model_name = "CreditRiskClassifier"             # Name for the model in MLflow Model Registry
+
+if best_model_run_id == "REPLACE_WITH_BEST_RUN_ID" or best_model_artifact_path == "REPLACE_WITH_BEST_MODEL_ARTIFACT_PATH":
+    print("\nSkipping MLflow model registration and final model saving.")
+    print("Please update 'best_model_run_id' and 'best_model_artifact_path' after reviewing MLflow UI to register your best model.")
+else:
+    model_uri = f"runs:/{best_model_run_id}/{best_model_artifact_path}"
+    
+    try:
+        # Register the best model in MLflow Model Registry
+        registered_model = mlflow.register_model(
+            model_uri=model_uri,
+            name=best_model_name,
+            tags={"purpose": "Credit Risk PD", "version": "1.0", "data_version": "v1_rfm_proxy"}
+            # description="Best performing model for high-risk customer identification, tuned with GridSearchCV."
+        )
+        print(f"\nModel registered as: {registered_model.name} (Version {registered_model.version})")
+        # MLflow UI URL (adjust port if different, default is 5000)
+        print(f"MLflow Model Registry URL: http://localhost:5000/#/models/{registered_model.name}/versions/{registered_model.version}")
+
+        # Final saving of the best model to disk (alternative/supplement to MLflow artifacts)
+        models_dir = os.path.join('./models/')
+        os.makedirs(models_dir, exist_ok=True)
+        
+        # Corrected: Assign the correct best model instance for local saving
+        if best_model_artifact_path == "best_logistic_regression_model":
+            final_best_model_instance = best_log_reg_model
+        elif best_model_artifact_path == "best_random_forest_model":
+            final_best_model_instance = best_rf_model
+        elif best_model_artifact_path == "best_gbm_model":
+            final_best_model_instance = best_gbm_model
+        elif best_model_artifact_path == "baseline_logistic_regression_model": 
+            final_best_model_instance = log_reg_baseline
+        elif best_model_artifact_path == "baseline_random_forest_model":
+            final_best_model_instance = rf_baseline
+        elif best_model_artifact_path == "baseline_gbm_model": 
+            final_best_model_instance = gbm_baseline
+        else:
+            print(f"Warning: Could not identify specific best model instance from artifact path: {best_model_artifact_path}. Skipping local save of best model.")
+            final_best_model_instance = None
+        
+        if final_best_model_instance:
+            joblib.dump(final_best_model_instance, os.path.join(models_dir, 'final_best_credit_risk_model.pkl'))
+            print(f"\nFinal best credit risk model saved to: {os.path.join(models_dir, 'final_best_credit_risk_model.pkl')}")
+
+
+    except Exception as e:
+        print(f"\nError during MLflow model registration or final saving: {e}")
+        print("Please ensure MLflow Tracking Server is running (`mlflow ui`) and the 'best_model_run_id' and 'best_model_artifact_path' are correctly updated.")
+        print("Also check that the model artifact exists at the specified URI.")
