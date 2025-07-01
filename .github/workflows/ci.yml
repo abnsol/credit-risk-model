@@ -1,0 +1,41 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main # Trigger on every push to the main branch
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest # Use a fresh Ubuntu environment
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4 # Action to check out your repository code
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9' # Use Python 3.9, consistent with Dockerfile
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt # Install all dependencies from your requirements.txt
+
+    - name: Run Flake8 Linter
+      run: |
+        # Install flake8 if not already in requirements.txt (it should be now)
+        # pip install flake8
+        flake8 src/ # Run flake8 on your src directory
+      # The build will fail if flake8 finds errors (non-zero exit code)
+
+    - name: Run Pytest Unit Tests
+      run: |
+        # Set PYTHONPATH to allow imports like 'from src.data_processing import ...'
+        export PYTHONPATH=$PYTHONPATH:$(pwd)
+        python -m pytest tests/ # Run pytest on your tests directory
+      # The build will fail if any tests fail (non-zero exit code)
+
+    # Optional: Add steps for Docker build, push to registry, or deployment here
+    # For now, we focus on linting and testing as per the task.
