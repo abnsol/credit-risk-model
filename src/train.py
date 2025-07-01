@@ -169,3 +169,75 @@ with mlflow.start_run(run_name="Random_Forest_Tuned"):
     mlflow.sklearn.log_model(best_rf_model, "best_random_forest_model")
     all_models["Random Forest (Best Tuned)"] = best_rf_model
     print(f"MLflow Run ID for Tuned RF: {mlflow.active_run().info.run_id}\n")
+
+# --- 3. Gradient Boosting Machines (GBM) ---
+print("--- Training Gradient Boosting Models ---")
+
+# Training a baseline Gradient Boosting model
+with mlflow.start_run(run_name="GBM_Baseline"):
+    print("Training Baseline Gradient Boosting model...")
+    # GBM does not have a class_weight parameter directly,
+    # but you can use `sample_weight` or adjust `scale_pos_weight` in libraries like XGBoost/LightGBM.
+    # For scikit-learn GBM, you might rely on `stratify=y` in train_test_split.
+    gbm_baseline = GradientBoostingClassifier(random_state=42)
+    gbm_baseline.fit(X_train, y_train)
+    print("Baseline Gradient Boosting model Trained.\n")
+
+    mlflow.log_param("model_type", "GBM Baseline")
+    mlflow.log_param("n_estimators", gbm_baseline.n_estimators)
+    mlflow.log_param("learning_rate", gbm_baseline.learning_rate)
+    mlflow.log_param("max_depth", gbm_baseline.max_depth)
+
+    y_pred_baseline = gbm_baseline.predict(X_test)
+    y_pred_proba_baseline = gbm_baseline.predict_proba(X_test)[:, 1]
+    mlflow.log_metric("roc_auc", roc_auc_score(y_test, y_pred_proba_baseline))
+    mlflow.log_metric("accuracy", accuracy_score(y_test, y_pred_baseline))
+    mlflow.log_metric("precision", precision_score(y_test, y_pred_baseline))
+    mlflow.log_metric("recall", recall_score(y_test, y_pred_baseline))
+    mlflow.log_metric("f1_score", f1_score(y_test, y_pred_baseline))
+    mlflow.sklearn.log_model(gbm_baseline, "baseline_gbm_model")
+    all_models["Gradient Boosting (Baseline)"] = gbm_baseline
+    print(f"MLflow Run ID for Baseline GBM: {mlflow.active_run().info.run_id}\n")
+
+
+# Training a tuned Gradient Boosting model
+with mlflow.start_run(run_name="GBM_Tuned"):
+    print("Starting Hyperparameter Tuning for Gradient Boosting Classifier...")
+    gbm_tuned = GradientBoostingClassifier(random_state=42) # Instantiate for tuning
+
+    gbm_param_grid = {
+        'n_estimators': [50, 100, 200],  # Number of boosting stages
+        'learning_rate': [0.01, 0.1, 0.2], # Contribution of each tree
+        'max_depth': [3, 5, 7],           # Max depth of each tree
+        'subsample': [0.8, 1.0],          # Fraction of samples for each tree
+    }
+
+    grid_search_gbm = GridSearchCV(
+        estimator=gbm_tuned,
+        param_grid=gbm_param_grid,
+        cv=cv_folds,
+        scoring='roc_auc',
+        n_jobs=-1,
+        verbose=2 # Set to 1 or 2 for detailed progress output
+    )
+
+    grid_search_gbm.fit(X_train, y_train)
+
+    best_gbm_model = grid_search_gbm.best_estimator_
+    print("Hyperparameter Tuning for Gradient Boosting Classifier Complete.")
+    print(f"Best Gradient Boosting Classifier Hyperparameters: {grid_search_gbm.best_params_}")
+    print(f"Best Cross-Validation ROC AUC: {grid_search_gbm.best_score_:.4f}\n")
+
+    mlflow.log_params(grid_search_gbm.best_params_)
+    mlflow.log_param("model_type", "GBM Tuned")
+
+    y_pred_tuned = best_gbm_model.predict(X_test)
+    y_pred_proba_tuned = best_gbm_model.predict_proba(X_test)[:, 1]
+    mlflow.log_metric("roc_auc", roc_auc_score(y_test, y_pred_proba_tuned))
+    mlflow.log_metric("accuracy", accuracy_score(y_test, y_pred_tuned))
+    mlflow.log_metric("precision", precision_score(y_test, y_pred_tuned))
+    mlflow.log_metric("recall", recall_score(y_test, y_pred_tuned))
+    mlflow.log_metric("f1_score", f1_score(y_test, y_pred_tuned))
+    mlflow.sklearn.log_model(best_gbm_model, "best_gbm_model")
+    all_models["Gradient Boosting (Best Tuned)"] = best_gbm_model
+    print(f"MLflow Run ID for Tuned GBM: {mlflow.active_run().info.run_id}\n")
