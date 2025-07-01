@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  credit_risk_api:
+    build: . # Build the Docker image from the Dockerfile in the current directory
+    ports:
+      - "8000:8000" # Map host port 8000 to container port 8000
+    volumes:
+      # Mount your Google Drive project folder into the container
+      # This is crucial for the API to access your saved models and processed data.
+      # IMPORTANT: Adjust the host path (`/path/to/your/google/drive/credit-risk-model`)
+      # to the actual absolute path where your `credit-risk-model` folder is located on your *host machine*
+      # (or where Colab mounts it, if you're building/running there).
+      # For Colab, it would be: /content/drive/My Drive/credit-risk-model:/app/credit-risk-model
+      # For local PC, it would be: /home/abnsol/Documents/KAIM/week 5/credit-risk-model:/app/credit-risk-model
+      - /home/abnsol/Documents/KAIM/week 5/credit-risk-model:/app/credit-risk-model # UPDATE THIS PATH for your local machine
+      # If you're running this *inside* Colab for Docker testing:
+      # - /content/drive/My Drive/credit-risk-model:/app/credit-risk-model
+    environment:
+      # Set the COLAB_MODELS_PATH environment variable for the API to find models
+      # This should match the path used in src/api/main.py
+      COLAB_MODELS_PATH: /app/credit-risk-model/models/ # Path inside the container
+
+    # Optional: If you have a separate MLflow Tracking Server, you can link it here
+    # depends_on:
+    #   - mlflow_server
+
+# Optional: Define an MLflow tracking server service if you want to run it via Docker Compose
+# mlflow_server:
+#   image: mlflow_server_image # You'd build or pull an MLflow server image
+#   ports:
+#     - "5000:5000"
+#   volumes:
+#     - ./mlruns:/mlruns # Persist MLflow data
+#     - ./mlflow_artifacts:/mlflow_artifacts # For artifact storage
+#   command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:///mlruns/mlruns.db --default-artifact-root file:///mlflow_artifacts
